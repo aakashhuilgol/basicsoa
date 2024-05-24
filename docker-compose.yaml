@@ -1,0 +1,134 @@
+---
+version: '3.8'
+services:
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: broker
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  payment-service:
+    build:
+      context: ../homeease/payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+#    ports:
+#      - "8089:8089"
+    depends_on:
+      - mongodb
+      - broker
+      - discovery-service
+      - api-gateway-service
+    environment:
+      - SPRING_DATA_MONGODB_HOST=mongodb
+      - SPRING_DATA_MONGODB_PORT=27017
+      - SPRING_DATA_MONGODB_DATABASE=payment
+      - SPRING_KAFKA_BOOTSTRAP-SERVERS=broker:29092
+      - SPRING_KAFKA_TEMPLATE_DEFAULT-TOPIC=notificationTopic
+      - SPRING_KAFKA_PRODUCER_KEY-SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
+      - SPRING_KAFKA_PRODUCER_VALUE-SERIALIZER=org.springframework.kafka.support.serializer.JsonSerializer
+#      - SPRING_KAFKA_PRODUCER_PROPERTIES_SPRING.JSON.TYPE.MAPPING=event:com.homeease.paymentservice.event.BookingPaidEvent
+        
+  notification-service:
+    build:
+      context: ../homeease/notification-service
+      dockerfile: Dockerfile
+    container_name: notification-service
+    #    ports:
+    #      - "8089:8089"
+    depends_on:
+      - broker
+      - discovery-service
+      - api-gateway-service
+    environment:
+      - SPRING_KAFKA_BOOTSTRAP-SERVERS=broker:29092
+      - SPRING_KAFKA_TEMPLATE_DEFAULT-TOPIC=notificationTopic
+      - SPRING_KAFKA_CONSUMER_GROUP-ID=homeeaseNotificationId
+      - SPRING_KAFKA_CONSUMER_KEY-DESERIALIZER=org.apache.kafka.common.serialization.StringDeserializer
+      - SPRING_KAFKA_CONSUMER_VALUE-DESERIALIZER=org.springframework.kafka.support.serializer.JsonDeserializer
+      - SPRING_KAFKA_CONSUMER_PROPERTIES_SPRING_JSON_TRUSTED_PACKAGES=*
+#      - SPRING_KAFKA_CONSUMER_PROPERTIES_SPRING.JSON.TYPE.MAPPING=event:com.homeease.notificationservice.BookingPaidEvent
+
+
+  registration-service:
+    build:
+      context: ../homeease/registration-service
+      dockerfile: Dockerfile
+    container_name: registration-service
+#    ports:
+#      - "8088:8088"
+    depends_on:
+      - mongodb
+      - discovery-service
+      - api-gateway-service
+    environment:
+      - SPRING_DATA_MONGODB_HOST=mongodb
+      - SPRING_DATA_MONGODB_PORT=27017
+      - SPRING_DATA_MONGODB_DATABASE=user
+
+  review-service:
+      build:
+        context: ../homeease/review-service
+        dockerfile: Dockerfile
+      container_name: review-service
+      #    ports:
+      #      - "8088:8088"
+      depends_on:
+        - mongodb
+        - discovery-service
+        - api-gateway-service
+      environment:
+        - SPRING_DATA_MONGODB_HOST=mongodb
+        - SPRING_DATA_MONGODB_PORT=27017
+        - SPRING_DATA_MONGODB_DATABASE=review
+
+  api-gateway-service:
+    build:
+      context: ../homeease/api-gateway-service
+      dockerfile: Dockerfile
+    container_name: api-gateway-service
+    pull_policy: always
+    ports:
+      - "8181:8080"
+    expose:
+      - "8181"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY= TRACE
+    depends_on:
+      - discovery-service
+
+  discovery-service:
+    build:
+      context: ../homeease/discovery-service
+      dockerfile: Dockerfile
+    container_name: discovery-server
+    pull_policy: always
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
